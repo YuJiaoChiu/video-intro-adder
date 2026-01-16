@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <title>视频片头添加器</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="logo">
+        <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect width="40" height="40" rx="8" fill="url(#gradient)"/>
+          <path d="M16 12L28 20L16 28V12Z" fill="white"/>
+          <rect x="10" y="10" width="4" height="20" rx="1" fill="white" opacity="0.6"/>
+          <defs>
+            <linearGradient id="gradient" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#0077ED"/>
+              <stop offset="1" stop-color="#00C7BE"/>
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
+      <h1>视频片头添加器</h1>
+      <p class="subtitle">批量为视频添加片头，快速高效，专为字幕组设计</p>
+    </header>
+
+    <main>
+      <!-- 片头选择 -->
+      <section class="input-section">
+        <label>
+          <span class="label-icon">1</span>
+          片头视频
+        </label>
+        <div class="file-input drop-zone" id="intro-drop-zone">
+          <input type="text" id="intro-path" placeholder="选择或拖放片头视频文件..." readonly>
+          <button id="btn-select-intro" class="btn btn-secondary">浏览</button>
+        </div>
+      </section>
+
+      <!-- 视频目录选择 -->
+      <section class="input-section">
+        <label>
+          <span class="label-icon">2</span>
+          视频目录
+        </label>
+        <div class="file-input drop-zone" id="video-drop-zone">
+          <input type="text" id="video-dir" placeholder="选择或拖放包含视频的文件夹..." readonly>
+          <button id="btn-select-video-dir" class="btn btn-secondary">浏览</button>
+        </div>
+        <div class="video-count" id="video-count"></div>
+      </section>
+
+      <!-- 输出目录选择 -->
+      <section class="input-section">
+        <label>
+          <span class="label-icon">3</span>
+          输出目录
+          <span class="label-hint">（可选）</span>
+        </label>
+        <div class="file-input">
+          <input type="text" id="output-dir" placeholder="默认在视频目录下创建 output 文件夹..." readonly>
+          <button id="btn-select-output-dir" class="btn btn-secondary">浏览</button>
+        </div>
+      </section>
+
+      <!-- 覆盖源文件选项 -->
+      <section class="input-section options-section">
+        <label class="checkbox-label">
+          <input type="checkbox" id="overwrite-source">
+          <span class="checkbox-custom"></span>
+          <span class="checkbox-text">覆盖源文件（直接替换原视频，不生成 output 文件夹）</span>
+        </label>
+      </section>
+
+      <!-- 视频列表 -->
+      <section class="video-list-section">
+        <label>待处理视频 <span id="selected-count"></span></label>
+        <div class="video-list" id="video-list">
+          <div class="empty-state">
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="8" y="12" width="32" height="24" rx="4" stroke="#86868b" stroke-width="2"/>
+              <path d="M20 20L28 24L20 28V20Z" fill="#86868b"/>
+            </svg>
+            <p>请先选择视频目录</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 进度显示 -->
+      <section class="progress-section" id="progress-section" style="display: none;">
+        <div class="progress-header">
+          <span id="progress-text">准备中...</span>
+          <span id="progress-percent">0%</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill" id="progress-fill"></div>
+        </div>
+        <div class="current-file" id="current-file"></div>
+      </section>
+
+      <!-- 日志区域 -->
+      <section class="log-section" id="log-section" style="display: none;">
+        <label>处理日志</label>
+        <div class="log-container" id="log-container"></div>
+      </section>
+    </main>
+
+    <footer>
+      <button id="btn-start" class="btn btn-primary btn-large" disabled>
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M4 2L14 8L4 14V2Z" fill="currentColor"/>
+        </svg>
+        开始处理
+      </button>
+      <button id="btn-cancel" class="btn btn-danger btn-large" style="display: none;">取消</button>
+    </footer>
+
+    <!-- 完成提示 -->
+    <div class="toast" id="toast" style="display: none;">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="10" cy="10" r="10" fill="#34c759"/>
+        <path d="M6 10L9 13L14 7" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span id="toast-message">处理完成</span>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
