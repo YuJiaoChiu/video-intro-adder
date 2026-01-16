@@ -6,6 +6,9 @@ on:
       - 'v*'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-mac:
     runs-on: macos-latest
@@ -22,9 +25,7 @@ jobs:
         run: npm install
 
       - name: Build macOS
-        run: npm run build:mac
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --mac --publish never
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
@@ -47,9 +48,7 @@ jobs:
         run: npm install
 
       - name: Build Windows
-        run: npm run build:win
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --win --publish never
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
@@ -61,8 +60,6 @@ jobs:
     needs: [build-mac, build-win]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
-    permissions:
-      contents: write
 
     steps:
       - name: Download macOS artifact
@@ -87,5 +84,3 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
