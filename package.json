@@ -13,7 +13,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/video-intro-adder.git"
+    "url": "https://github.com/YuJiaoChiu/video-intro-adder.git"
   },
   "keywords": [
     "video",
@@ -22,7 +22,7 @@
     "subtitle",
     "batch"
   ],
-  "author": "",
+  "author": "YuJiaoChiu",
   "license": "MIT",
   "devDependencies": {
     "electron": "^28.0.0",
@@ -35,7 +35,7 @@
   },
   "build": {
     "appId": "com.subtitle.video-intro-adder",
-    "productName": "视频片头添加器",
+    "productName": "VideoIntroAdder",
     "copyright": "Copyright © 2024",
     "directories": {
       "output": "dist"
@@ -54,40 +54,19 @@
           "target": "nsis",
           "arch": ["x64"]
         }
-      ],
-      "icon": "assets/icon.png"
+      ]
     },
     "mac": {
       "target": ["dmg"],
-      "icon": "assets/icon.png",
       "category": "public.app-category.video"
     },
     "linux": {
       "target": ["AppImage"],
-      "icon": "assets/icon.png",
       "category": "Video"
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "installerLanguages": ["zh_CN", "en_US"],
-      "language": "2052",
-      "installerIcon": "assets/icon.ico",
-      "uninstallerIcon": "assets/icon.ico"
-    },
-    "dmg": {
-      "contents": [
-        {
-          "x": 130,
-          "y": 220
-        },
-        {
-          "x": 410,
-          "y": 220,
-          "type": "link",
-          "path": "/Applications"
-        }
-      ]
+      "allowToChangeInstallationDirectory": true
     }
   }
 }
