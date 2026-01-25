@@ -2,22 +2,27 @@ const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { spawn, execSync } = require('child_process');
+
+// FFmpeg 路径
+let ffmpegPath = '';
+let ffprobePath = '';
 
 // 设置内置的 ffmpeg 和 ffprobe 路径
 function setupFFmpeg() {
   try {
-    const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
-    const ffprobePath = require('@ffprobe-installer/ffprobe').path;
+    ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+    ffprobePath = require('@ffprobe-installer/ffprobe').path;
 
     // 处理 asar 打包后的路径
-    const fixedFfmpegPath = ffmpegPath.replace('app.asar', 'app.asar.unpacked');
-    const fixedFfprobePath = ffprobePath.replace('app.asar', 'app.asar.unpacked');
+    ffmpegPath = ffmpegPath.replace('app.asar', 'app.asar.unpacked');
+    ffprobePath = ffprobePath.replace('app.asar', 'app.asar.unpacked');
 
-    ffmpeg.setFfmpegPath(fixedFfmpegPath);
-    ffmpeg.setFfprobePath(fixedFfprobePath);
+    ffmpeg.setFfmpegPath(ffmpegPath);
+    ffmpeg.setFfprobePath(ffprobePath);
 
-    console.log('FFmpeg path:', fixedFfmpegPath);
-    console.log('FFprobe path:', fixedFfprobePath);
+    console.log('FFmpeg path:', ffmpegPath);
+    console.log('FFprobe path:', ffprobePath);
   } catch (error) {
     console.error('FFmpeg 初始化失败:', error);
     throw new Error('FFmpeg 初始化失败，请重新安装应用');
@@ -25,6 +30,35 @@ function setupFFmpeg() {
 }
 
 setupFFmpeg();
+
+// 执行 FFmpeg 命令
+function runFFmpeg(args) {
+  return new Promise((resolve, reject) => {
+    console.log('执行 FFmpeg:', ffmpegPath, args.join(' '));
+
+    const proc = spawn(ffmpegPath, args);
+
+    let stderr = '';
+    proc.stderr.on('data', (data) => {
+      stderr += data.toString();
+      // 实时输出进度
+      process.stdout.write(data.toString());
+    });
+
+    proc.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        console.error('FFmpeg 错误输出:', stderr);
+        reject(new Error(`FFmpeg 退出码: ${code}\n${stderr.slice(-500)}`));
+      }
+    });
+
+    proc.on('error', (err) => {
+      reject(err);
+    });
+  });
+}
 
 // 获取视频信息
 function getVideoInfo(filePath) {
@@ -47,7 +81,9 @@ function getVideoInfo(filePath) {
         acodec: audioStream?.codec_name,
         sample_rate: audioStream?.sample_rate,
         channels: audioStream?.channels,
-        duration: metadata.format.duration
+        duration: metadata.format.duration,
+        video_time_base: videoStream?.time_base,
+        audio_time_base: audioStream?.time_base
       });
     });
   });
@@ -78,9 +114,16 @@ function getAudioEncoder(codec) {
   return encoderMap[codec] || 'aac';
 }
 
-// 转码片头以匹配主视频参数
-function transcodeIntro(introPath, videoInfo, outputPath) {
-  return new Promise((resolve, reject) => {
+// 获取视频的比特流滤镜
+function getVideoBsf(codec) {
+  if (codec === 'h264') return 'h264_mp4toannexb';
+  if (codec === 'hevc' || codec === 'h265') return 'hevc_mp4toannexb';
+  return null;
+}
+
+// 转码片头并输出为 TS 格式
+function transcodeIntroToTS(introPath, videoInfo, outputPath) {
+  return new Promise(async (resolve, reject) => {
     const { width, height, fps, vcodec, pix_fmt, acodec, sample_rate, channels } = videoInfo;
 
     // 解析帧率
@@ -95,48 +138,88 @@ function transcodeIntro(introPath, videoInfo, outputPath) {
     }
     fpsValue = Math.round(fpsValue * 100) / 100;
 
-    const command = ffmpeg(introPath)
-      .videoFilters([
-        `scale=${width}:${height}:force_original_aspect_ratio=decrease`,
-        `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`,
-        `fps=${fpsValue}`,
-        `format=${pix_fmt || 'yuv420p'}`
-      ])
-      .videoCodec(getEncoder(vcodec))
-      .addOutputOptions(['-preset', 'fast', '-crf', '18'])
-      .audioCodec(getAudioEncoder(acodec))
-      .audioFrequency(parseInt(sample_rate) || 48000)
-      .audioChannels(parseInt(channels) || 2)
-      .output(outputPath)
-      .on('end', () => resolve())
-      .on('error', (err) => reject(err));
+    const videoBsf = getVideoBsf(vcodec);
 
-    command.run();
+    const args = [
+      '-y',
+      '-i', introPath,
+      '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,fps=${fpsValue},format=${pix_fmt || 'yuv420p'}`,
+      '-c:v', getEncoder(vcodec),
+      '-preset', 'fast',
+      '-crf', '18',
+      '-c:a', getAudioEncoder(acodec),
+      '-ar', String(parseInt(sample_rate) || 48000),
+      '-ac', String(parseInt(channels) || 2),
+    ];
+
+    // 添加比特流滤镜（用于 TS 格式）
+    if (videoBsf) {
+      args.push('-bsf:v', videoBsf);
+    }
+
+    args.push('-f', 'mpegts', outputPath);
+
+    try {
+      await runFFmpeg(args);
+      resolve();
+    } catch (err) {
+      reject(err);
+    }
   });
 }
 
-// 拼接视频（无损拼接）
-function concatVideos(introPath, videoPath, outputPath, tempDir) {
-  return new Promise((resolve, reject) => {
-    const listFile = path.join(tempDir, `concat_${Date.now()}.txt`);
-    const content = `file '${introPath.replace(/'/g, "'\\''")}'\nfile '${videoPath.replace(/'/g, "'\\''")}'`;
+// 将主视频转换为 TS 格式（不重新编码）
+function convertToTS(inputPath, outputPath, vcodec) {
+  return new Promise(async (resolve, reject) => {
+    const videoBsf = getVideoBsf(vcodec);
 
-    fs.writeFileSync(listFile, content);
+    const args = [
+      '-y',
+      '-i', inputPath,
+      '-c', 'copy',
+    ];
 
-    ffmpeg()
-      .input(listFile)
-      .inputOptions(['-f', 'concat', '-safe', '0'])
-      .outputOptions(['-c', 'copy'])
-      .output(outputPath)
-      .on('end', () => {
-        try { fs.unlinkSync(listFile); } catch (e) {}
-        resolve();
-      })
-      .on('error', (err) => {
-        try { fs.unlinkSync(listFile); } catch (e) {}
-        reject(err);
-      })
-      .run();
+    if (videoBsf) {
+      args.push('-bsf:v', videoBsf);
+    }
+
+    args.push('-f', 'mpegts', outputPath);
+
+    try {
+      await runFFmpeg(args);
+      resolve();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+// 使用 concat protocol 拼接 TS 文件并输出为目标格式
+function concatTSFiles(tsFiles, outputPath, vcodec) {
+  return new Promise(async (resolve, reject) => {
+    // 构建 concat 输入
+    const concatInput = 'concat:' + tsFiles.join('|');
+
+    const args = [
+      '-y',
+      '-i', concatInput,
+      '-c', 'copy',
+    ];
+
+    // 如果输出是 MP4，需要添加音频比特流滤镜
+    const ext = path.extname(outputPath).toLowerCase();
+    if (ext === '.mp4' || ext === '.m4v' || ext === '.mov') {
+      args.push('-bsf:a', 'aac_adtstoasc');
+    }
+
+    args.push('-movflags', '+faststart', outputPath);
+
+    try {
+      await runFFmpeg(args);
+      resolve();
+    } catch (err) {
+      reject(err);
+    }
   });
 }
 
@@ -151,7 +234,6 @@ function getVideoFilesRecursive(dir, baseDir, introPath) {
       const filePath = path.join(dir, file);
       const stat = fs.statSync(filePath);
       if (stat.isDirectory()) {
-        // 跳过 output 文件夹
         if (file.toLowerCase() === 'output') continue;
         results = results.concat(getVideoFilesRecursive(filePath, baseDir, introPath));
       } else {
@@ -173,7 +255,6 @@ function getVideoFilesRecursive(dir, baseDir, introPath) {
 
 // 处理所有视频
 async function processVideos(introPath, videoDir, outputDir, overwriteSource, onProgress) {
-  // 递归获取所有视频文件（相对路径）
   const videoFiles = getVideoFilesRecursive(videoDir, videoDir, introPath);
 
   if (videoFiles.length === 0) {
@@ -185,12 +266,10 @@ async function processVideos(introPath, videoDir, outputDir, overwriteSource, on
     };
   }
 
-  // 创建输出目录（非覆盖模式）
   if (!overwriteSource && !fs.existsSync(outputDir)) {
     fs.mkdirSync(outputDir, { recursive: true });
   }
 
-  // 创建临时目录
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'video-intro-'));
 
   let successCount = 0;
@@ -201,7 +280,6 @@ async function processVideos(introPath, videoDir, outputDir, overwriteSource, on
     const videoPath = path.join(videoDir, relativePath);
     const ext = path.extname(relativePath);
 
-    // 根据是否覆盖源文件决定输出路径
     let outputPath;
     let tempOutputPath = null;
 
@@ -226,21 +304,35 @@ async function processVideos(introPath, videoDir, outputDir, overwriteSource, on
     });
 
     try {
-      // 获取主视频信息
+      // 步骤 1: 获取主视频信息
       const videoInfo = await getVideoInfo(videoPath);
+      console.log('主视频信息:', JSON.stringify(videoInfo, null, 2));
 
       onProgress({
         current: i + 1,
         total: videoFiles.length,
         filename: relativePath,
         status: 'processing',
-        percent: 30,
+        percent: 15,
         message: `转码片头中: ${relativePath}`
       });
 
-      // 转码片头
-      const tempIntro = path.join(tempDir, `intro_${i}${ext}`);
-      await transcodeIntro(introPath, videoInfo, tempIntro);
+      // 步骤 2: 转码片头为 TS 格式
+      const introTS = path.join(tempDir, `intro_${i}.ts`);
+      await transcodeIntroToTS(introPath, videoInfo, introTS);
+
+      onProgress({
+        current: i + 1,
+        total: videoFiles.length,
+        filename: relativePath,
+        status: 'processing',
+        percent: 45,
+        message: `转换主视频格式: ${relativePath}`
+      });
+
+      // 步骤 3: 将主视频转换为 TS 格式（不重新编码）
+      const videoTS = path.join(tempDir, `video_${i}.ts`);
+      await convertToTS(videoPath, videoTS, videoInfo.vcodec);
 
       onProgress({
         current: i + 1,
@@ -251,12 +343,13 @@ async function processVideos(introPath, videoDir, outputDir, overwriteSource, on
         message: `拼接视频中: ${relativePath}`
       });
 
-      // 拼接
+      // 步骤 4: 使用 concat protocol 拼接 TS 文件
       const concatTarget = overwriteSource ? tempOutputPath : outputPath;
-      await concatVideos(tempIntro, videoPath, concatTarget, tempDir);
+      await concatTSFiles([introTS, videoTS], concatTarget, videoInfo.vcodec);
 
-      // 清理临时片头
-      try { fs.unlinkSync(tempIntro); } catch (e) {}
+      // 清理临时文件
+      try { fs.unlinkSync(introTS); } catch (e) {}
+      try { fs.unlinkSync(videoTS); } catch (e) {}
 
       // 覆盖模式：替换原文件
       if (overwriteSource && tempOutputPath) {
